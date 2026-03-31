@@ -142,16 +142,28 @@ function M.chip_select()
 			ui.warn("No chips found on network")
 			return
 		end
-		ui.pick(chips, function(c)
-			local ref = type(c) == "table" and (c.ref_id or c.ref) or tostring(c)
-			local name = type(c) == "table" and (c.housing_name or c.name or tostring(ref)) or tostring(ref)
-			return string.format("%s  [%s]", name, ref)
-		end, function(choice)
-			local ref = type(choice) == "table" and (choice.ref_id or choice.ref) or tostring(choice)
-			local name = type(choice) == "table" and (choice.housing_name or choice.name or tostring(ref))
-				or tostring(ref)
+
+		-- Build flat string labels and a lookup map so vim.ui.select
+		-- works correctly regardless of which UI plugin is installed.
+		local labels = {}
+		local by_label = {}
+		for _, c in ipairs(chips) do
+			local ref = tostring(type(c) == "table" and (c.ref_id or c.ref) or c)
+			local name = type(c) == "table" and (c.housing_name or c.name or ref) or ref
+			local label = string.format("%s  [%s]", name, ref)
+			table.insert(labels, label)
+			by_label[label] = c
+		end
+
+		vim.ui.select(labels, { prompt = "Select chip:" }, function(label)
+			if not label then
+				return
+			end
+			local c = by_label[label]
+			local ref = tostring(type(c) == "table" and (c.ref_id or c.ref) or c)
+			local name = type(c) == "table" and (c.housing_name or c.name or ref) or ref
 			state().current_chip_ref = ref
-			ui.info("Active chip → " .. name .. " (" .. tostring(ref) .. ")")
+			ui.info("Active chip → " .. name .. " (" .. ref .. ")")
 		end)
 	end)
 end
@@ -209,7 +221,7 @@ function M.patch_chip()
 		if type(r) == "string" then
 			remote = r
 		elseif type(r) == "table" then
-			remote = r.code or r.source or ""
+			remote = r.source or r.code or ""
 		else
 			remote = ""
 		end
