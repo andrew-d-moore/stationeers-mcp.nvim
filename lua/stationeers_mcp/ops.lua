@@ -217,10 +217,13 @@ function M.push_buffer()
 	tool("set_chip_code", { ref_id = ref, source = code }, function(r)
 		local ok = type(r) == "table" and r.ok
 		ui.info("Pushed to chip " .. tostring(ref) .. (ok and " — compiled OK" or ""))
+		-- Sync the in-game IC editor draft so it reflects the pushed source
+		tool("set_editor_code", { source = code }, function(_) end)
 	end)
 end
 
---- Diff-push: send only changed substrings using patch_chip_code.
+--- patch_chip: uses vim.diff to compute line-level hunks and sends only changed
+--- regions via patch_chip_code. Falls back to push_buffer on any failure.
 function M.patch_chip()
 	local ref = state().current_chip_ref
 	if not ref then
@@ -236,17 +239,58 @@ function M.patch_chip()
 		else
 			remote = ""
 		end
-		-- Normalise line endings: server uses \n, Windows buffers may use \r\n
 		remote = remote:gsub("\r\n", "\n"):gsub("\r", "\n")
+
 		local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
 		local local_ = table.concat(lines, "\n"):gsub("\r\n", "\n"):gsub("\r", "\n")
+
 		if remote == local_ then
 			ui.info("No changes — chip source is already up to date")
 			return
 		end
-		local replacements = { { old = remote, new = local_ } }
-		tool("patch_chip_code", { ref_id = ref, replacements = replacements }, function(_)
-			ui.info("Patched chip " .. tostring(ref))
+
+		-- Build line-level replacements using vim.diff
+		local replacements = {}
+		local ok, hunks = pcall(vim.diff, remote, local_, { result_type = "indices" })
+		if ok and hunks and #hunks > 0 then
+			local remote_lines = vim.split(remote, "\n")
+			local local_lines = vim.split(local_, "\n")
+			for _, hunk in ipairs(hunks) do
+				-- hunk = { ra, rc, ba, bc } (start line, count for each side, 1-indexed)
+				local ra, rc, ba, bc = hunk[1], hunk[2], hunk[3], hunk[4]
+				local old_chunk = {}
+				for i = ra, ra + rc - 1 do
+					table.insert(old_chunk, remote_lines[i] or "")
+				end
+				local new_chunk = {}
+				for i = ba, ba + bc - 1 do
+					table.insert(new_chunk, local_lines[i] or "")
+				end
+				local old_str = table.concat(old_chunk, "\n")
+				local new_str = table.concat(new_chunk, "\n")
+				if old_str ~= new_str and old_str ~= "" then
+					table.insert(replacements, { old = old_str, new = new_str })
+				end
+			end
+		end
+
+		if #replacements == 0 then
+			-- Diff produced no actionable hunks — fall back to full push
+			ui.info("Falling back to full push")
+			M.push_buffer()
+			return
+		end
+
+		tool("patch_chip_code", { ref_id = ref, replacements = replacements }, function(res)
+			local err = type(res) == "table" and res.error
+			if err then
+				ui.warn("Patch failed (" .. tostring(err) .. "), falling back to full push")
+				M.push_buffer()
+			else
+				ui.info("Patched chip " .. tostring(ref) .. " (" .. #replacements .. " hunk(s))")
+				-- Sync the in-game IC editor draft so it reflects the patched source
+				tool("set_editor_code", { source = local_ }, function(_) end)
+			end
 		end)
 	end)
 end
