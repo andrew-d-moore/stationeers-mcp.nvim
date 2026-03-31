@@ -26,9 +26,22 @@ end
 -- This decodes the inner JSON and returns the Lua value.
 
 local function unwrap(r)
+	-- Step 1: extract content[1].text from the MCP envelope
+	local text = r
 	if type(r) == "table" and r.content and r.content[1] and r.content[1].text then
-		local ok, decoded = pcall(vim.json.decode, r.content[1].text)
+		text = r.content[1].text
+	end
+	-- Step 2: decode if it's a JSON string (may need two passes if double-encoded)
+	if type(text) == "string" then
+		local ok, decoded = pcall(vim.json.decode, text)
 		if ok then
+			-- Step 3: if still a string after first decode, decode again
+			if type(decoded) == "string" then
+				local ok2, decoded2 = pcall(vim.json.decode, decoded)
+				if ok2 then
+					return decoded2
+				end
+			end
 			return decoded
 		end
 	end
@@ -97,7 +110,14 @@ end
 
 function M.list_chips(callback)
 	tool("list_chips", {}, function(r)
-		-- After unwrap, r is a bare array of chip objects
+		-- r may still be a JSON string if the server double-encodes
+		if type(r) == "string" then
+			local ok, decoded = pcall(vim.json.decode, r)
+			if ok then
+				r = decoded
+			end
+		end
+
 		local chips = {}
 		if type(r) == "table" then
 			if vim.islist(r) then
@@ -110,7 +130,7 @@ function M.list_chips(callback)
 		if callback then
 			callback(chips)
 		else
-			ui.show_result("Chip List", chips[1], "json")
+			ui.show_result("Chip List", chips, "json")
 		end
 	end)
 end
