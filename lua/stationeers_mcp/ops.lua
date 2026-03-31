@@ -236,8 +236,10 @@ function M.patch_chip()
 		else
 			remote = ""
 		end
+		-- Normalise line endings: server uses \n, Windows buffers may use \r\n
+		remote = remote:gsub("\r\n", "\n"):gsub("\r", "\n")
 		local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-		local local_ = table.concat(lines, "\n")
+		local local_ = table.concat(lines, "\n"):gsub("\r\n", "\n"):gsub("\r", "\n")
 		if remote == local_ then
 			ui.info("No changes — chip source is already up to date")
 			return
