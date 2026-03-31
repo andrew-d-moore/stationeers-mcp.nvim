@@ -171,7 +171,7 @@ function M.push_buffer()
 	end
 	local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
 	local code = table.concat(lines, "\n")
-	tool("set_chip_code", { ref_id = ref, code = code }, function(r)
+	tool("set_chip_code", { ref_id = ref, source = code }, function(r)
 		local ok = type(r) == "table" and r.ok
 		ui.info("Pushed to chip " .. tostring(ref) .. (ok and " — compiled OK" or ""))
 	end)
@@ -210,7 +210,7 @@ end
 function M.push_editor()
 	local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
 	local code = table.concat(lines, "\n")
-	tool("set_editor_code", { code = code }, function(_)
+	tool("set_editor_code", { source = code }, function(_)
 		ui.info("Staged in IC editor draft")
 	end)
 end
