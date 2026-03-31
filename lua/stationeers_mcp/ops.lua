@@ -110,7 +110,7 @@ function M.list_chips(callback)
 		if callback then
 			callback(chips)
 		else
-			ui.show_result("Chip List", chips, "json")
+			ui.show_result("Chip List", unwrap(chips), "json")
 		end
 	end)
 end
