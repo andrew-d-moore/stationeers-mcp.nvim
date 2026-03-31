@@ -6,7 +6,6 @@ local ui = require("stationeers_mcp.ui")
 
 local M = {}
 
--- Will be injected by init.lua
 M._cfg = nil
 M._state = nil
 
@@ -19,6 +18,39 @@ end
 
 local function rpc(method, params, cb)
 	http.rpc(cfg(), method, params, cb)
+end
+
+-- ── Envelope unwrapper ────────────────────────────────────────────────────
+-- The server wraps every tool result as:
+--   { content = { { type = "text", text = "<json string>" } } }
+-- This decodes the inner JSON and returns the Lua value.
+
+local function unwrap(r)
+	if type(r) == "table" and r.content and r.content[1] and r.content[1].text then
+		local ok, decoded = pcall(vim.json.decode, r.content[1].text)
+		if ok then
+			return decoded
+		end
+	end
+	return r
+end
+
+-- ── Tool call helper ──────────────────────────────────────────────────────
+-- unwrap() is called here so every callback receives clean data automatically.
+
+local function tool(name, args, on_ok, on_err)
+	rpc("tools/call", { name = name, arguments = args or {} }, function(err, result)
+		if err then
+			ui.error(name .. ": " .. err)
+			if on_err then
+				on_err(err)
+			end
+		else
+			if on_ok then
+				on_ok(unwrap(result))
+			end
+		end
+	end)
 end
 
 -- ── Connection ────────────────────────────────────────────────────────────
@@ -55,23 +87,6 @@ function M.disconnect()
 	ui.info("Disconnected")
 end
 
--- ── Tool call helper ──────────────────────────────────────────────────────
-
-local function tool(name, args, on_ok, on_err)
-	rpc("tools/call", { name = name, arguments = args or {} }, function(err, result)
-		if err then
-			ui.error(name .. ": " .. err)
-			if on_err then
-				on_err(err)
-			end
-		else
-			if on_ok then
-				on_ok(result)
-			end
-		end
-	end)
-end
-
 -- ── Editor & Chip ─────────────────────────────────────────────────────────
 
 function M.get_editor_state()
@@ -82,12 +97,20 @@ end
 
 function M.list_chips(callback)
 	tool("list_chips", {}, function(r)
-		local chips = (r and r.chips) or {}
+		-- After unwrap, r is a bare array of chip objects
+		local chips = {}
+		if type(r) == "table" then
+			if vim.islist(r) then
+				chips = r
+			elseif r.chips and vim.islist(r.chips) then
+				chips = r.chips
+			end
+		end
 		state().chips = chips
 		if callback then
 			callback(chips)
 		else
-			ui.show_result("Chip List", r, "json")
+			ui.show_result("Chip List", chips, "json")
 		end
 	end)
 end
@@ -100,14 +123,15 @@ function M.chip_select()
 			return
 		end
 		ui.pick(chips, function(c)
-			local ref = type(c) == "table" and (c.ref or c.ref_id) or tostring(c)
-			local name = type(c) == "table" and (c.name or ref) or ref
-			return string.format("[%s]  %s", ref, name)
+			local ref = type(c) == "table" and (c.ref_id or c.ref) or tostring(c)
+			local name = type(c) == "table" and (c.housing_name or c.name or tostring(ref)) or tostring(ref)
+			return string.format("%s  [%s]", name, ref)
 		end, function(choice)
-			local ref = type(choice) == "table" and (choice.ref or choice.ref_id) or tostring(choice)
+			local ref = type(choice) == "table" and (choice.ref_id or choice.ref) or tostring(choice)
+			local name = type(choice) == "table" and (choice.housing_name or choice.name or tostring(ref))
+				or tostring(ref)
 			state().current_chip_ref = ref
-			local name = type(choice) == "table" and (choice.name or ref) or ref
-			ui.info("Active chip → " .. name .. " (" .. ref .. ")")
+			ui.info("Active chip → " .. name .. " (" .. tostring(ref) .. ")")
 		end)
 	end)
 end
@@ -120,14 +144,21 @@ function M.pull_chip()
 		return
 	end
 	tool("get_chip_code", { ref_id = ref }, function(r)
-		local code = (r and r.code) or tostring(r)
+		local code
+		if type(r) == "string" then
+			code = r
+		elseif type(r) == "table" then
+			code = r.code or r.source or vim.inspect(r)
+		else
+			code = tostring(r)
+		end
 		local buf = vim.api.nvim_create_buf(true, false)
 		vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(code, "\n"))
 		vim.bo[buf].filetype = "lua"
 		vim.bo[buf].buftype = ""
-		vim.api.nvim_buf_set_name(buf, "stationeers://" .. ref .. ".lua")
+		vim.api.nvim_buf_set_name(buf, "stationeers://" .. tostring(ref) .. ".lua")
 		vim.api.nvim_set_current_buf(buf)
-		ui.info("Pulled chip " .. ref)
+		ui.info("Pulled chip " .. tostring(ref))
 	end)
 end
 
@@ -141,7 +172,8 @@ function M.push_buffer()
 	local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
 	local code = table.concat(lines, "\n")
 	tool("set_chip_code", { ref_id = ref, code = code }, function(r)
-		ui.info("Pushed to chip " .. ref .. (r and r.ok and " — compiled OK" or ""))
+		local ok = type(r) == "table" and r.ok
+		ui.info("Pushed to chip " .. tostring(ref) .. (ok and " — compiled OK" or ""))
 	end)
 end
 
@@ -152,22 +184,24 @@ function M.patch_chip()
 		ui.warn("No chip selected — run :McpChipSelect first")
 		return
 	end
-	-- Fetch current chip source, diff against buffer, build replacements
 	tool("get_chip_code", { ref_id = ref }, function(r)
-		local remote = (r and r.code) or ""
+		local remote
+		if type(r) == "string" then
+			remote = r
+		elseif type(r) == "table" then
+			remote = r.code or r.source or ""
+		else
+			remote = ""
+		end
 		local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
 		local local_ = table.concat(lines, "\n")
-
 		if remote == local_ then
 			ui.info("No changes — chip source is already up to date")
 			return
 		end
-
-		-- Simple whole-file replacement via patch (substring = entire old code)
-		-- For a smarter diff you could integrate vim.diff() here
 		local replacements = { { old = remote, new = local_ } }
-		tool("patch_chip_code", { ref_id = ref, replacements = replacements }, function(pr)
-			ui.info("Patched chip " .. ref)
+		tool("patch_chip_code", { ref_id = ref, replacements = replacements }, function(_)
+			ui.info("Patched chip " .. tostring(ref))
 		end)
 	end)
 end
@@ -176,7 +210,7 @@ end
 function M.push_editor()
 	local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
 	local code = table.concat(lines, "\n")
-	tool("set_editor_code", { code = code }, function()
+	tool("set_editor_code", { code = code }, function(_)
 		ui.info("Staged in IC editor draft")
 	end)
 end
@@ -190,13 +224,14 @@ function M.chip_errors()
 		return
 	end
 	tool("get_chip_errors", { ref_id = ref }, function(r)
-		local errors = (r and r.errors) or {}
+		local errors = {}
+		if type(r) == "table" then
+			errors = vim.islist(r) and r or (r.errors or {})
+		end
 		if #errors == 0 then
-			ui.info("No errors on chip " .. ref)
+			ui.info("No errors on chip " .. tostring(ref))
 			return
 		end
-
-		-- Also populate quickfix list
 		local qf = {}
 		for _, e in ipairs(errors) do
 			table.insert(qf, {
@@ -207,7 +242,7 @@ function M.chip_errors()
 			})
 		end
 		vim.fn.setqflist(qf, "r")
-		vim.fn.setqflist({}, "a", { title = "Stationeers chip errors: " .. ref })
+		vim.fn.setqflist({}, "a", { title = "Stationeers chip errors: " .. tostring(ref) })
 		vim.cmd("copen")
 		ui.info(#errors .. " error(s) loaded into quickfix")
 	end)
@@ -221,7 +256,7 @@ function M.chip_logs()
 		return
 	end
 
-	local win = ui.log_window("Chip Logs — " .. ref, 300)
+	local win = ui.log_window("Chip Logs — " .. tostring(ref), 300)
 	local since = 0
 	local timer = vim.loop.new_timer()
 
@@ -235,11 +270,11 @@ function M.chip_logs()
 			if not r then
 				return
 			end
-			local logs = r.logs or {}
+			local logs = type(r) == "table" and (vim.islist(r) and r or (r.logs or {})) or {}
 			for _, line in ipairs(logs) do
-				win:append(line)
+				win:append(tostring(line))
 			end
-			if r.revision then
+			if type(r) == "table" and r.revision then
 				since = r.revision
 			end
 		end)
@@ -248,7 +283,6 @@ function M.chip_logs()
 	fetch()
 	timer:start(2000, 2000, vim.schedule_wrap(fetch))
 
-	-- Stop timer when the window closes
 	vim.api.nvim_buf_attach(win.buf, false, {
 		on_detach = function()
 			timer:stop()
@@ -272,10 +306,10 @@ function M.get_all_devices()
 end
 
 function M.read_device_value(ref_id, logic_type)
-	if not ref_id then
+	if not ref_id or ref_id == "" then
 		ref_id = vim.fn.input("Device ref ID: ")
 	end
-	if not logic_type then
+	if not logic_type or logic_type == "" then
 		logic_type = vim.fn.input("LogicType (e.g. Pressure): ")
 	end
 	tool("read_device_value", { ref_id = ref_id, logic_type = logic_type }, function(r)
@@ -287,11 +321,6 @@ end
 
 function M.game_state()
 	tool("get_game_state", {}, function(r)
-		local lines = {
-			"  World : " .. (r and r.world or "?"),
-			"  Time  : " .. (r and r.time or "?"),
-			"  Tick  : " .. tostring(r and r.tick or "?"),
-		}
 		ui.show_result("Game State", r, "json")
 	end)
 end
@@ -304,7 +333,7 @@ function M.search_docs(query)
 		return
 	end
 	tool("search_docs", { query = query }, function(r)
-		ui.show_result("Docs: " .. query, r, "markdown")
+		ui.show_result("Docs: " .. query, r, "json")
 	end)
 end
 
