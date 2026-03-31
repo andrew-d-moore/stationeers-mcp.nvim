@@ -26,26 +26,37 @@ end
 -- This decodes the inner JSON and returns the Lua value.
 
 local function unwrap(r)
-	-- Step 1: extract content[1].text from the MCP envelope
-	local text = r
-	if type(r) == "table" and r.content and r.content[1] and r.content[1].text then
-		text = r.content[1].text
+	if type(r) ~= "table" then
+		return r
 	end
-	-- Step 2: decode if it's a JSON string (may need two passes if double-encoded)
-	if type(text) == "string" then
-		local ok, decoded = pcall(vim.json.decode, text)
-		if ok then
-			-- Step 3: if still a string after first decode, decode again
-			if type(decoded) == "string" then
-				local ok2, decoded2 = pcall(vim.json.decode, decoded)
-				if ok2 then
-					return decoded2
-				end
-			end
-			return decoded
+
+	-- Server uses two envelope shapes depending on the tool:
+	--   array:  { content = { { type="text", text="..." } } }
+	--   plain:  { content = { type="text", text="..." } }
+	local text
+	if type(r.content) == "table" then
+		if r.content[1] and r.content[1].text then
+			text = r.content[1].text -- array envelope
+		elseif r.content.text then
+			text = r.content.text -- plain table envelope
 		end
 	end
-	return r
+
+	if type(text) ~= "string" then
+		return r
+	end
+
+	local ok, decoded = pcall(vim.json.decode, text)
+	if not ok then
+		return r
+	end
+	if type(decoded) == "string" then
+		local ok2, decoded2 = pcall(vim.json.decode, decoded)
+		if ok2 then
+			return decoded2
+		end
+	end
+	return decoded
 end
 
 -- ── Tool call helper ──────────────────────────────────────────────────────
