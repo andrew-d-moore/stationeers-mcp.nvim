@@ -384,7 +384,7 @@ function M.chip_logs()
 	end
 
 	fetch()
-	timer:start(2000, 2000, vim.schedule_wrap(fetch))
+	timer:start(cfg().log_poll_ms or 500, cfg().log_poll_ms or 500, vim.schedule_wrap(fetch))
 
 	vim.api.nvim_buf_attach(win.buf, false, {
 		on_detach = function()
