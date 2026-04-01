@@ -217,8 +217,6 @@ function M.push_buffer()
 	tool("set_chip_code", { ref_id = ref, source = code }, function(r)
 		local ok = type(r) == "table" and r.ok
 		ui.info("Pushed to chip " .. tostring(ref) .. (ok and " — compiled OK" or ""))
-		-- Sync the in-game IC editor draft so it reflects the pushed source
-		tool("set_editor_code", { source = code }, function(_) end)
 	end)
 end
 
@@ -245,9 +243,14 @@ function M.patch_chip()
 		local local_ = table.concat(lines, "\n"):gsub("\r\n", "\n"):gsub("\r", "\n")
 
 		if remote == local_ then
-			ui.info("No changes — chip source is already up to date")
+			ui.info("No changes — chip source matches server exactly")
 			return
 		end
+		-- Show a diff summary so you know what's being sent
+		vim.notify(
+			string.format("[stationeers-mcp] remote=%d bytes  local=%d bytes", #remote, #local_),
+			vim.log.levels.DEBUG
+		)
 
 		-- Build line-level replacements using vim.diff
 		local replacements = {}
@@ -288,8 +291,6 @@ function M.patch_chip()
 				M.push_buffer()
 			else
 				ui.info("Patched chip " .. tostring(ref) .. " (" .. #replacements .. " hunk(s))")
-				-- Sync the in-game IC editor draft so it reflects the patched source
-				tool("set_editor_code", { source = local_ }, function(_) end)
 			end
 		end)
 	end)
