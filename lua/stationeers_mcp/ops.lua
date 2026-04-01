@@ -321,27 +321,27 @@ function M.chip_errors()
 		return
 	end
 	tool("get_chip_errors", { ref_id = ref }, function(r)
-		local errors = {}
-		if type(r) == "table" then
-			errors = vim.islist(r) and r or (r.errors or {})
+		if type(r) ~= "table" then
+			ui.info("No error info for chip " .. tostring(ref))
+			return
 		end
-		if #errors == 0 then
+		-- Response is a single object: { last_error_message, last_error_line, has_runtime, ... }
+		if not r.last_error_message and not r.error_code then
 			ui.info("No errors on chip " .. tostring(ref))
 			return
 		end
-		local qf = {}
-		for _, e in ipairs(errors) do
-			table.insert(qf, {
-				lnum = e.line or 0,
-				col = 0,
-				text = e.message or tostring(e),
-				type = "E",
-			})
+		local line = r.last_error_line or 0
+		local msg = r.last_error_message or r.error_code or "unknown error"
+		-- Strip colour tags from error_code e.g. <color=red>Unknown</color>
+		msg = msg:gsub("<[^>]+>", "")
+		local qf = { { lnum = line, col = 0, text = msg, type = "E" } }
+		if r.last_error_traceback and r.last_error_traceback ~= "" then
+			table.insert(qf, { lnum = 0, col = 0, text = r.last_error_traceback, type = "W" })
 		end
 		vim.fn.setqflist(qf, "r")
 		vim.fn.setqflist({}, "a", { title = "Stationeers chip errors: " .. tostring(ref) })
 		vim.cmd("copen")
-		ui.info(#errors .. " error(s) loaded into quickfix")
+		ui.info("Error at line " .. tostring(line) .. " loaded into quickfix")
 	end)
 end
 
@@ -364,15 +364,21 @@ function M.chip_logs()
 			return
 		end
 		tool("get_chip_logs", { ref_id = ref, since_revision = since }, function(r)
-			if not r then
+			if not r or type(r) ~= "table" then
 				return
 			end
-			local logs = type(r) == "table" and (vim.islist(r) and r or (r.logs or {})) or {}
-			for _, line in ipairs(logs) do
-				win:append(tostring(line))
-			end
-			if type(r) == "table" and r.revision then
-				since = r.revision
+			-- Response: { log_text = "line1\nline2\n...", log_revision = N, has_logs = bool }
+			if r.has_logs and r.log_text then
+				-- Only show new lines since last revision
+				if r.log_revision and r.log_revision ~= since then
+					local lines = vim.split(r.log_text, "\n", { plain = true })
+					for _, line in ipairs(lines) do
+						if line ~= "" then
+							win:append(line)
+						end
+					end
+					since = r.log_revision
+				end
 			end
 		end)
 	end
