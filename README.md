@@ -16,7 +16,7 @@ inspection, and documentation search — without leaving your editor.
 
 ```lua
 {
-  "yourname/stationeers-mcp.nvim",
+  "andrew-d-moore/stationeers-mcp.nvim",
   config = function()
     require("stationeers_mcp").setup({
       host = "127.0.0.1",
@@ -42,7 +42,7 @@ inspection, and documentation search — without leaving your editor.
 
 ```lua
 use {
-  "yourname/stationeers-mcp.nvim",
+  "andrew-d-moore/stationeers-mcp.nvim",
   config = function()
     require("stationeers_mcp").setup()
   end,
@@ -52,7 +52,7 @@ use {
 ### vim-plug / manual
 
 ```vim
-Plug 'yourname/stationeers-mcp.nvim'
+Plug 'andrew-d-moore/stationeers-mcp.nvim'
 ```
 Then in `init.lua`:
 ```lua
@@ -89,7 +89,7 @@ require("stationeers_mcp").setup()
 :McpConnect          → handshake
 :McpChipSelect       → pick PressureCtrl
 :McpPullChip         → opens stationeers://chip_abc.lua in a buffer
-  [edit the file]
+[edit the file]
 :McpPushBuffer       → compiles and exports to chip immediately
 :McpChipErrors       → any errors → quickfix
 :McpChipLogs         → floating live log window (polls every 2s)
@@ -133,6 +133,7 @@ require("stationeers_mcp").setup({
   log = {
     max_lines = 500,
   },
+  log_poll_ms = 500, -- chip log polling interval in milliseconds
 })
 ```
 
