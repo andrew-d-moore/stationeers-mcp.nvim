@@ -191,15 +191,22 @@ function M.pull_chip()
 		if type(r) == "string" then
 			code = r
 		elseif type(r) == "table" then
-			code = r.code or r.source or vim.inspect(r)
+			code = r.source or r.code or vim.inspect(r)
 		else
 			code = tostring(r)
 		end
-		local buf = vim.api.nvim_create_buf(true, false)
+		local bufname = "stationeers://" .. tostring(ref) .. ".lua"
+		-- Reuse existing buffer if already open, otherwise create a new one
+		local buf = vim.fn.bufnr(bufname)
+		if buf == -1 then
+			buf = vim.api.nvim_create_buf(true, false)
+			vim.api.nvim_buf_set_name(buf, bufname)
+		end
+		vim.bo[buf].modifiable = true
 		vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(code, "\n"))
 		vim.bo[buf].filetype = "lua"
 		vim.bo[buf].buftype = ""
-		vim.api.nvim_buf_set_name(buf, "stationeers://" .. tostring(ref) .. ".lua")
+		vim.bo[buf].modified = false
 		vim.api.nvim_set_current_buf(buf)
 		ui.info("Pulled chip " .. tostring(ref))
 	end)
