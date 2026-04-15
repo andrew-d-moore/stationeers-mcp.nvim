@@ -13,6 +13,7 @@ M.defaults = {
 		open_hub = "<leader>mh",
 		push_buffer = "<leader>mp",
 		pull_chip = "<leader>mr",
+		connect = "<leader>mn",
 		chip_select = "<leader>mc",
 		chip_list = "<leader>ml",
 		chip_errors = "<leader>me",
